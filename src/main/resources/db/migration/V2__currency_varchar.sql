@@ -1,0 +1,2 @@
+ALTER TABLE transaction
+  ALTER COLUMN currency TYPE VARCHAR(3);
