@@ -26,4 +26,9 @@ public class AccountRepositoryAdapter implements AccountRepositoryPort {
     public Optional<AccountEntity> findById(UUID id) {
         return repo.findById(id);
     }
+
+    @Override
+    public Optional<AccountEntity> findByIdForUpdate(UUID id) {
+        return repo.findByIdForUpdate(id);
+    }
 }

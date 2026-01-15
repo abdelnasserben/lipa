@@ -8,4 +8,5 @@ import java.util.UUID;
 public interface AccountRepositoryPort {
     AccountEntity save(AccountEntity entity);
     Optional<AccountEntity> findById(UUID id);
+    Optional<AccountEntity> findByIdForUpdate(UUID id); // verrouille la ligne account (pour éviter 2 paiements concurrents)
 }

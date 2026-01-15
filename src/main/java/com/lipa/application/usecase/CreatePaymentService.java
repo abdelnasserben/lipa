@@ -21,6 +21,7 @@ public class CreatePaymentService implements CreatePaymentUseCase {
     private final AccountRepositoryPort accountRepository;
     private final TransactionRepositoryPort transactionRepository;
     private final LedgerEntryRepositoryPort ledgerRepository;
+    private final LedgerQueryPort ledgerQuery;
     private final AuditRepositoryPort auditRepository;
     private final VerifyPinUseCase verifyPinUseCase;
     private final TimeProviderPort time;
@@ -29,6 +30,7 @@ public class CreatePaymentService implements CreatePaymentUseCase {
                                 AccountRepositoryPort accountRepository,
                                 TransactionRepositoryPort transactionRepository,
                                 LedgerEntryRepositoryPort ledgerRepository,
+                                LedgerQueryPort ledgerQuery,
                                 AuditRepositoryPort auditRepository,
                                 VerifyPinUseCase verifyPinUseCase,
                                 TimeProviderPort time) {
@@ -36,6 +38,7 @@ public class CreatePaymentService implements CreatePaymentUseCase {
         this.accountRepository = accountRepository;
         this.transactionRepository = transactionRepository;
         this.ledgerRepository = ledgerRepository;
+        this.ledgerQuery = ledgerQuery;
         this.auditRepository = auditRepository;
         this.verifyPinUseCase = verifyPinUseCase;
         this.time = time;
@@ -46,7 +49,7 @@ public class CreatePaymentService implements CreatePaymentUseCase {
     public Result create(Command command) {
         validate(command);
 
-        // 1) Idempotency: si la transaction existe déjà, on la renvoie
+        // 1) Idempotency
         var existing = transactionRepository.findByIdempotencyKey(command.idempotencyKey().trim());
         if (existing.isPresent()) {
             return new Result(existing.get().getId(), existing.get().getStatus().name());
@@ -74,6 +77,15 @@ public class CreatePaymentService implements CreatePaymentUseCase {
             throw new BusinessRuleException("Card has no account linked");
         }
 
+        // Verrou DB sur le compte payeur (évite 2 paiements simultanés)
+        AccountEntity finalPayer = payer;
+        payer = accountRepository.findByIdForUpdate(payer.getId())
+                .orElseThrow(() -> new NotFoundException("Payer account not found id=" + finalPayer.getId()));
+
+        if (payer.getStatus() != AccountEntity.AccountStatus.ACTIVE) {
+            throw new BusinessRuleException("Payer account is not active");
+        }
+
         AccountEntity merchant = accountRepository.findById(command.merchantAccountId())
                 .orElseThrow(() -> new NotFoundException("Merchant account not found id=" + command.merchantAccountId()));
 
@@ -81,9 +93,34 @@ public class CreatePaymentService implements CreatePaymentUseCase {
             throw new BusinessRuleException("Merchant account is not active");
         }
 
+        // 4) Contrôle de solde (strict)
+        BigDecimal credits = defaultZero(ledgerQuery.sumCredits(payer.getId()));
+        BigDecimal debits  = defaultZero(ledgerQuery.sumDebits(payer.getId()));
+        BigDecimal balance = credits.subtract(debits);
+
+        if (balance.compareTo(command.amount()) < 0) {
+            // Audit refusé (optionnel mais utile)
+            AuditEventEntity refused = new AuditEventEntity();
+            refused.setId(UUID.randomUUID());
+            refused.setActorType(AuditEventEntity.ActorType.CLIENT);
+            refused.setActorId(payer.getId());
+            refused.setAction("PAYMENT_REFUSED_INSUFFICIENT_FUNDS");
+            refused.setTargetType(AuditEventEntity.TargetType.ACCOUNT);
+            refused.setTargetId(payer.getId());
+            refused.setMetadata(Map.of(
+                    "balance", balance.toPlainString(),
+                    "amount", command.amount().toPlainString(),
+                    "currency", command.currency().trim()
+            ));
+            refused.setCreatedAt(time.now());
+            auditRepository.save(refused);
+
+            throw new BusinessRuleException("Insufficient funds");
+        }
+
         Instant now = time.now();
 
-        // 4) Créer la transaction
+        // 5) Créer la transaction
         TransactionEntity txn = new TransactionEntity();
         txn.setId(UUID.randomUUID());
         txn.setType(TransactionEntity.TransactionType.PAYMENT);
@@ -96,7 +133,7 @@ public class CreatePaymentService implements CreatePaymentUseCase {
 
         txn = transactionRepository.save(txn);
 
-        // 5) Écritures ledger (source de vérité)
+        // 6) Ledger entries
         LedgerEntryEntity debit = new LedgerEntryEntity();
         debit.setId(UUID.randomUUID());
         debit.setTransaction(txn);
@@ -115,7 +152,7 @@ public class CreatePaymentService implements CreatePaymentUseCase {
         credit.setCreatedAt(now);
         ledgerRepository.save(credit);
 
-        // 6) Audit
+        // 7) Audit succès
         AuditEventEntity audit = new AuditEventEntity();
         audit.setId(UUID.randomUUID());
         audit.setActorType(AuditEventEntity.ActorType.CLIENT);
@@ -159,5 +196,9 @@ public class CreatePaymentService implements CreatePaymentUseCase {
         if (command.idempotencyKey() == null || command.idempotencyKey().trim().isEmpty()) {
             throw new BusinessRuleException("idempotencyKey is required");
         }
+    }
+
+    private BigDecimal defaultZero(BigDecimal v) {
+        return v == null ? BigDecimal.ZERO : v;
     }
 }
