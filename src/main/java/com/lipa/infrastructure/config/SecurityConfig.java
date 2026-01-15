@@ -27,6 +27,9 @@ public class SecurityConfig {
                         // Protected: cash-in (AGENT or ADMIN)
                         .requestMatchers(HttpMethod.POST, "/api/v1/transactions/cash-ins").hasAnyRole("AGENT", "ADMIN")
 
+                        // Back-office (lecture) : ADMIN uniquement
+                        .requestMatchers(HttpMethod.GET, "/api/v1/backoffice/**").hasRole("ADMIN")
+
                         // For now: keep the rest open to not slow MVP
                         .anyRequest().permitAll()
                 )
