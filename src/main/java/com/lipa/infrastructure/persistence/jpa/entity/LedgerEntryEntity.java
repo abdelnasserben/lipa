@@ -36,7 +36,7 @@ public class LedgerEntryEntity {
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 10)
-    private EntryDirection direction;
+    private Direction direction;
 
     @Column(nullable = false, precision = 19, scale = 2)
     private BigDecimal amount;
@@ -54,5 +54,5 @@ public class LedgerEntryEntity {
         }
     }
 
-    public enum EntryDirection {DEBIT, CREDIT}
+    public enum Direction {DEBIT, CREDIT}
 }
