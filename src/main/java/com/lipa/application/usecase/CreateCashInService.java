@@ -1,39 +1,34 @@
 package com.lipa.application.usecase;
 
+import com.lipa.application.dto.CashInPersistCommand;
 import com.lipa.application.exception.BusinessRuleException;
 import com.lipa.application.exception.NotFoundException;
 import com.lipa.application.port.in.CreateCashInUseCase;
-import com.lipa.application.port.out.*;
-import com.lipa.infrastructure.persistence.jpa.entity.AccountEntity;
-import com.lipa.infrastructure.persistence.jpa.entity.AuditEventEntity;
-import com.lipa.infrastructure.persistence.jpa.entity.LedgerEntryEntity;
-import com.lipa.infrastructure.persistence.jpa.entity.TransactionEntity;
+import com.lipa.application.port.out.CashInAccountPort;
+import com.lipa.application.port.out.CashInIdempotencyPort;
+import com.lipa.application.port.out.CashInPersistencePort;
+import com.lipa.application.port.out.TimeProviderPort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.Map;
-import java.util.UUID;
 
 @Service
 public class CreateCashInService implements CreateCashInUseCase {
 
-    private final AccountRepositoryPort accountRepository;
-    private final TransactionRepositoryPort transactionRepository;
-    private final LedgerEntryRepositoryPort ledgerRepository;
-    private final AuditRepositoryPort auditRepository;
+    private final CashInAccountPort accountPort;
+    private final CashInIdempotencyPort idempotencyPort;
+    private final CashInPersistencePort persistencePort;
     private final TimeProviderPort time;
 
-    public CreateCashInService(AccountRepositoryPort accountRepository,
-                               TransactionRepositoryPort transactionRepository,
-                               LedgerEntryRepositoryPort ledgerRepository,
-                               AuditRepositoryPort auditRepository,
+    public CreateCashInService(CashInAccountPort accountPort,
+                               CashInIdempotencyPort idempotencyPort,
+                               CashInPersistencePort persistencePort,
                                TimeProviderPort time) {
-        this.accountRepository = accountRepository;
-        this.transactionRepository = transactionRepository;
-        this.ledgerRepository = ledgerRepository;
-        this.auditRepository = auditRepository;
+        this.accountPort = accountPort;
+        this.idempotencyPort = idempotencyPort;
+        this.persistencePort = persistencePort;
         this.time = time;
     }
 
@@ -42,83 +37,44 @@ public class CreateCashInService implements CreateCashInUseCase {
     public Result create(Command command) {
         validate(command);
 
-        // Idempotency
-        var existing = transactionRepository.findByIdempotencyKey(command.idempotencyKey().trim());
+        // 1) Idempotency
+        var existing = idempotencyPort.findByIdempotencyKey(command.idempotencyKey().trim());
         if (existing.isPresent()) {
-            return new Result(existing.get().getId(), existing.get().getStatus().name());
+            return new Result(existing.get().transactionId(), existing.get().status());
         }
 
-        // Load accounts
-        AccountEntity client = accountRepository.findById(command.clientAccountId())
+        // 2) Load accounts (light snapshots)
+        var client = accountPort.findById(command.clientAccountId())
                 .orElseThrow(() -> new NotFoundException("Client account not found id=" + command.clientAccountId()));
 
-        AccountEntity technical = accountRepository.findById(command.technicalAccountId())
+        var technical = accountPort.findById(command.technicalAccountId())
                 .orElseThrow(() -> new NotFoundException("Technical account not found id=" + command.technicalAccountId()));
 
-        if (client.getStatus() != AccountEntity.AccountStatus.ACTIVE) {
+        // 3) Business rules (same behavior as before)
+        if (!"ACTIVE".equalsIgnoreCase(client.status())) {
             throw new BusinessRuleException("Client account is not active");
         }
-        if (technical.getStatus() != AccountEntity.AccountStatus.ACTIVE) {
+        if (!"ACTIVE".equalsIgnoreCase(technical.status())) {
             throw new BusinessRuleException("Technical account is not active");
         }
-        if (technical.getType() != AccountEntity.AccountType.TECHNICAL) {
+        if (!"TECHNICAL".equalsIgnoreCase(technical.type())) {
             throw new BusinessRuleException("Source account must be TECHNICAL");
         }
 
+        // 4) Persist transaction + ledger + audit (infra does JPA details)
         Instant now = time.now();
 
-        // Create transaction
-        TransactionEntity txn = new TransactionEntity();
-        txn.setId(UUID.randomUUID());
-        txn.setType(TransactionEntity.TransactionType.CASH_IN);
-        txn.setStatus(TransactionEntity.TransactionStatus.SUCCESS);
-        txn.setAmount(command.amount());
-        txn.setCurrency(command.currency().trim());
-        txn.setIdempotencyKey(command.idempotencyKey().trim());
-        txn.setDescription(command.description());
-        txn.setCreatedAt(now);
-
-        txn = transactionRepository.save(txn);
-
-        // Ledger entries
-        // CREDIT client
-        LedgerEntryEntity creditClient = new LedgerEntryEntity();
-        creditClient.setId(UUID.randomUUID());
-        creditClient.setTransaction(txn);
-        creditClient.setAccount(client);
-        creditClient.setDirection(LedgerEntryEntity.Direction.CREDIT);
-        creditClient.setAmount(command.amount());
-        creditClient.setCreatedAt(now);
-        ledgerRepository.save(creditClient);
-
-        // DEBIT technical
-        LedgerEntryEntity debitTechnical = new LedgerEntryEntity();
-        debitTechnical.setId(UUID.randomUUID());
-        debitTechnical.setTransaction(txn);
-        debitTechnical.setAccount(technical);
-        debitTechnical.setDirection(LedgerEntryEntity.Direction.DEBIT);
-        debitTechnical.setAmount(command.amount());
-        debitTechnical.setCreatedAt(now);
-        ledgerRepository.save(debitTechnical);
-
-        // Audit
-        AuditEventEntity audit = new AuditEventEntity();
-        audit.setId(UUID.randomUUID());
-        audit.setActorType(AuditEventEntity.ActorType.SYSTEM);
-        audit.setAction("CASH_IN_CREATED");
-        audit.setTargetType(AuditEventEntity.TargetType.TRANSACTION);
-        audit.setTargetId(txn.getId());
-        audit.setMetadata(Map.of(
-                "clientAccountId", client.getId().toString(),
-                "technicalAccountId", technical.getId().toString(),
-                "amount", command.amount().toPlainString(),
-                "currency", command.currency().trim(),
-                "idempotencyKey", command.idempotencyKey().trim()
+        var persisted = persistencePort.persist(new CashInPersistCommand(
+                command.clientAccountId(),
+                command.technicalAccountId(),
+                command.amount(),
+                command.currency().trim(),
+                command.idempotencyKey().trim(),
+                command.description(),
+                now
         ));
-        audit.setCreatedAt(now);
-        auditRepository.save(audit);
 
-        return new Result(txn.getId(), txn.getStatus().name());
+        return new Result(persisted.transactionId(), persisted.status());
     }
 
     private void validate(Command command) {

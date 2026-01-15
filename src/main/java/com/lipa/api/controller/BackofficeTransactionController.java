@@ -1,9 +1,14 @@
 package com.lipa.api.controller;
 
+import com.lipa.api.dto.BackofficeTransactionItem;
 import com.lipa.api.dto.BackofficeTransactionSearchResponse;
-import com.lipa.application.usecase.SearchTransactionsBackofficeService;
+import com.lipa.application.dto.BackofficeTransactionSearchCriteria;
+import com.lipa.application.port.in.SearchTransactionsBackofficeUseCase;
 import org.springframework.format.annotation.DateTimeFormat;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
 import java.util.UUID;
@@ -12,10 +17,10 @@ import java.util.UUID;
 @RequestMapping("/api/v1/backoffice/transactions")
 public class BackofficeTransactionController {
 
-    private final SearchTransactionsBackofficeService service;
+    private final SearchTransactionsBackofficeUseCase useCase;
 
-    public BackofficeTransactionController(SearchTransactionsBackofficeService service) {
-        this.service = service;
+    public BackofficeTransactionController(SearchTransactionsBackofficeUseCase useCase) {
+        this.useCase = useCase;
     }
 
     @GetMapping
@@ -34,6 +39,23 @@ public class BackofficeTransactionController {
         if (limit > 200) limit = 200;
         if (offset < 0) offset = 0;
 
-        return service.search(accountId, type, status, idempotencyKey, from, to, limit, offset);
+        var criteria = new BackofficeTransactionSearchCriteria(accountId, type, status, idempotencyKey, from, to);
+
+        var result = useCase.search(criteria, limit, offset);
+
+        var apiItems = result.items().stream()
+                .map(i -> new BackofficeTransactionItem(
+                        i.id(),
+                        i.type(),
+                        i.status(),
+                        i.amount(),
+                        i.currency(),
+                        i.idempotencyKey(),
+                        i.description(),
+                        i.createdAt()
+                ))
+                .toList();
+
+        return new BackofficeTransactionSearchResponse(result.limit(), result.offset(), result.total(), apiItems);
     }
 }

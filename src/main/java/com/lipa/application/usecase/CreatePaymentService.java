@@ -1,11 +1,11 @@
 package com.lipa.application.usecase;
 
+import com.lipa.application.dto.*;
 import com.lipa.application.exception.BusinessRuleException;
 import com.lipa.application.exception.NotFoundException;
 import com.lipa.application.port.in.CreatePaymentUseCase;
 import com.lipa.application.port.in.VerifyPinUseCase;
 import com.lipa.application.port.out.*;
-import com.lipa.infrastructure.persistence.jpa.entity.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,30 +17,30 @@ import java.util.UUID;
 @Service
 public class CreatePaymentService implements CreatePaymentUseCase {
 
-    private final CardRepositoryPort cardRepository;
-    private final AccountRepositoryPort accountRepository;
-    private final TransactionRepositoryPort transactionRepository;
-    private final LedgerEntryRepositoryPort ledgerRepository;
-    private final LedgerQueryPort ledgerQuery;
-    private final AuditRepositoryPort auditRepository;
+    private final PaymentIdempotencyPort idempotencyPort;
     private final VerifyPinUseCase verifyPinUseCase;
+    private final PaymentCardPort cardPort;
+    private final PaymentAccountPort accountPort;
+    private final PaymentLedgerPort ledgerPort;
+    private final PaymentPersistencePort persistencePort;
+    private final PaymentAuditPort auditPort;
     private final TimeProviderPort time;
 
-    public CreatePaymentService(CardRepositoryPort cardRepository,
-                                AccountRepositoryPort accountRepository,
-                                TransactionRepositoryPort transactionRepository,
-                                LedgerEntryRepositoryPort ledgerRepository,
-                                LedgerQueryPort ledgerQuery,
-                                AuditRepositoryPort auditRepository,
+    public CreatePaymentService(PaymentIdempotencyPort idempotencyPort,
                                 VerifyPinUseCase verifyPinUseCase,
+                                PaymentCardPort cardPort,
+                                PaymentAccountPort accountPort,
+                                PaymentLedgerPort ledgerPort,
+                                PaymentPersistencePort persistencePort,
+                                PaymentAuditPort auditPort,
                                 TimeProviderPort time) {
-        this.cardRepository = cardRepository;
-        this.accountRepository = accountRepository;
-        this.transactionRepository = transactionRepository;
-        this.ledgerRepository = ledgerRepository;
-        this.ledgerQuery = ledgerQuery;
-        this.auditRepository = auditRepository;
+        this.idempotencyPort = idempotencyPort;
         this.verifyPinUseCase = verifyPinUseCase;
+        this.cardPort = cardPort;
+        this.accountPort = accountPort;
+        this.ledgerPort = ledgerPort;
+        this.persistencePort = persistencePort;
+        this.auditPort = auditPort;
         this.time = time;
     }
 
@@ -49,14 +49,19 @@ public class CreatePaymentService implements CreatePaymentUseCase {
     public Result create(Command command) {
         validate(command);
 
+        String uid = command.cardUid().trim();
+        String currency = command.currency().trim();
+        String idemKey = command.idempotencyKey().trim();
+        Instant now = time.now();
+
         // 1) Idempotency
-        var existing = transactionRepository.findByIdempotencyKey(command.idempotencyKey().trim());
+        var existing = idempotencyPort.findByIdempotencyKey(idemKey);
         if (existing.isPresent()) {
-            return new Result(existing.get().getId(), existing.get().getStatus().name());
+            return new Result(existing.get().transactionId(), existing.get().status());
         }
 
-        // 2) Vérifier PIN
-        var pinResult = verifyPinUseCase.verify(new VerifyPinUseCase.Command(command.cardUid(), command.pin()));
+        // 2) Vérifier PIN (use case existant)
+        var pinResult = verifyPinUseCase.verify(new VerifyPinUseCase.Command(uid, command.pin()));
         if (!pinResult.success()) {
             if (pinResult.cardBlocked()) {
                 throw new BusinessRuleException("PIN blocked or invalid");
@@ -64,114 +69,91 @@ public class CreatePaymentService implements CreatePaymentUseCase {
             throw new BusinessRuleException("Invalid PIN");
         }
 
-        // 3) Charger carte + comptes
-        CardEntity card = cardRepository.findByUid(command.cardUid().trim())
-                .orElseThrow(() -> new NotFoundException("Card not found for uid=" + command.cardUid()));
+        // 3) Charger la carte (snapshot)
+        CardSnapshot card = cardPort.findByUid(uid)
+                .orElseThrow(() -> new NotFoundException("Card not found for uid=" + uid));
 
-        if (card.getStatus() != CardEntity.CardStatus.ACTIVE) {
+        if (!"ACTIVE".equalsIgnoreCase(card.status())) {
             throw new BusinessRuleException("Card is not active");
         }
-
-        AccountEntity payer = card.getAccount();
-        if (payer == null) {
+        if (card.accountId() == null) {
             throw new BusinessRuleException("Card has no account linked");
         }
 
-        // Verrou DB sur le compte payeur (évite 2 paiements simultanés)
-        AccountEntity finalPayer = payer;
-        payer = accountRepository.findByIdForUpdate(payer.getId())
-                .orElseThrow(() -> new NotFoundException("Payer account not found id=" + finalPayer.getId()));
+        // 4) Verrou DB sur le compte payeur + contrôles statuts
+        UUID payerId = card.accountId();
 
-        if (payer.getStatus() != AccountEntity.AccountStatus.ACTIVE) {
+        AccountSnapshot payer = accountPort.findByIdForUpdate(payerId)
+                .orElseThrow(() -> new NotFoundException("Payer account not found id=" + payerId));
+
+        if (!"ACTIVE".equalsIgnoreCase(payer.status())) {
             throw new BusinessRuleException("Payer account is not active");
         }
 
-        AccountEntity merchant = accountRepository.findById(command.merchantAccountId())
+        AccountSnapshot merchant = accountPort.findById(command.merchantAccountId())
                 .orElseThrow(() -> new NotFoundException("Merchant account not found id=" + command.merchantAccountId()));
 
-        if (merchant.getStatus() != AccountEntity.AccountStatus.ACTIVE) {
+        if (!"ACTIVE".equalsIgnoreCase(merchant.status())) {
             throw new BusinessRuleException("Merchant account is not active");
         }
 
-        // 4) Contrôle de solde (strict)
-        BigDecimal credits = defaultZero(ledgerQuery.sumCredits(payer.getId()));
-        BigDecimal debits  = defaultZero(ledgerQuery.sumDebits(payer.getId()));
+        // 5) Contrôle de solde (strict)
+        BigDecimal credits = defaultZero(ledgerPort.sumCredits(payerId));
+        BigDecimal debits = defaultZero(ledgerPort.sumDebits(payerId));
         BigDecimal balance = credits.subtract(debits);
 
         if (balance.compareTo(command.amount()) < 0) {
-            // Audit refusé (optionnel mais utile)
-            AuditEventEntity refused = new AuditEventEntity();
-            refused.setId(UUID.randomUUID());
-            refused.setActorType(AuditEventEntity.ActorType.CLIENT);
-            refused.setActorId(payer.getId());
-            refused.setAction("PAYMENT_REFUSED_INSUFFICIENT_FUNDS");
-            refused.setTargetType(AuditEventEntity.TargetType.ACCOUNT);
-            refused.setTargetId(payer.getId());
-            refused.setMetadata(Map.of(
-                    "balance", balance.toPlainString(),
-                    "amount", command.amount().toPlainString(),
-                    "currency", command.currency().trim()
+            // Audit refusé (utile pour le backoffice / investigations)
+            auditPort.record(new PaymentAuditCommand(
+                    "CLIENT",
+                    payerId,
+                    "PAYMENT_REFUSED_INSUFFICIENT_FUNDS",
+                    "ACCOUNT",
+                    payerId,
+                    Map.of(
+                            "cardUid", uid,
+                            "balance", balance.toPlainString(),
+                            "amount", command.amount().toPlainString(),
+                            "currency", currency,
+                            "merchantAccountId", command.merchantAccountId().toString(),
+                            "idempotencyKey", idemKey
+                    ),
+                    now
             ));
-            refused.setCreatedAt(time.now());
-            auditRepository.save(refused);
 
             throw new BusinessRuleException("Insufficient funds");
         }
 
-        Instant now = time.now();
-
-        // 5) Créer la transaction
-        TransactionEntity txn = new TransactionEntity();
-        txn.setId(UUID.randomUUID());
-        txn.setType(TransactionEntity.TransactionType.PAYMENT);
-        txn.setStatus(TransactionEntity.TransactionStatus.SUCCESS);
-        txn.setAmount(command.amount());
-        txn.setCurrency(command.currency().trim());
-        txn.setIdempotencyKey(command.idempotencyKey().trim());
-        txn.setDescription(command.description());
-        txn.setCreatedAt(now);
-
-        txn = transactionRepository.save(txn);
-
-        // 6) Ledger entries
-        LedgerEntryEntity debit = new LedgerEntryEntity();
-        debit.setId(UUID.randomUUID());
-        debit.setTransaction(txn);
-        debit.setAccount(payer);
-        debit.setDirection(LedgerEntryEntity.Direction.DEBIT);
-        debit.setAmount(command.amount());
-        debit.setCreatedAt(now);
-        ledgerRepository.save(debit);
-
-        LedgerEntryEntity credit = new LedgerEntryEntity();
-        credit.setId(UUID.randomUUID());
-        credit.setTransaction(txn);
-        credit.setAccount(merchant);
-        credit.setDirection(LedgerEntryEntity.Direction.CREDIT);
-        credit.setAmount(command.amount());
-        credit.setCreatedAt(now);
-        ledgerRepository.save(credit);
+        // 6) Persister transaction + ledger (infra)
+        PaymentPersistResult persisted = persistencePort.persist(new PaymentPersistCommand(
+                payerId,
+                command.merchantAccountId(),
+                command.amount(),
+                currency,
+                idemKey,
+                command.description(),
+                now
+        ));
 
         // 7) Audit succès
-        AuditEventEntity audit = new AuditEventEntity();
-        audit.setId(UUID.randomUUID());
-        audit.setActorType(AuditEventEntity.ActorType.CLIENT);
-        audit.setActorId(payer.getId());
-        audit.setAction("PAYMENT_CREATED");
-        audit.setTargetType(AuditEventEntity.TargetType.TRANSACTION);
-        audit.setTargetId(txn.getId());
-        audit.setMetadata(Map.of(
-                "cardUid", command.cardUid().trim(),
-                "payerAccountId", payer.getId().toString(),
-                "merchantAccountId", merchant.getId().toString(),
-                "amount", command.amount().toPlainString(),
-                "currency", command.currency().trim(),
-                "idempotencyKey", command.idempotencyKey().trim()
+        auditPort.record(new PaymentAuditCommand(
+                "CLIENT",
+                payerId,
+                "PAYMENT_CREATED",
+                "TRANSACTION",
+                persisted.transactionId(),
+                Map.of(
+                        "cardUid", uid,
+                        "payerAccountId", payerId.toString(),
+                        "merchantAccountId", command.merchantAccountId().toString(),
+                        "amount", command.amount().toPlainString(),
+                        "currency", currency,
+                        "idempotencyKey", idemKey
+                ),
+                now
         ));
-        audit.setCreatedAt(now);
-        auditRepository.save(audit);
 
-        return new Result(txn.getId(), txn.getStatus().name());
+        return new Result(persisted.transactionId(), persisted.status());
     }
 
     private void validate(Command command) {

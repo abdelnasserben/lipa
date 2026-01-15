@@ -1,35 +1,37 @@
 package com.lipa.application.usecase;
 
+import com.lipa.application.dto.EnrollCardPersistCommand;
+import com.lipa.application.dto.EnrollCardPersistResult;
 import com.lipa.application.exception.BusinessRuleException;
 import com.lipa.application.port.in.EnrollCardUseCase;
-import com.lipa.application.port.out.AccountRepositoryPort;
-import com.lipa.application.port.out.AuditRepositoryPort;
-import com.lipa.application.port.out.CardRepositoryPort;
+import com.lipa.application.port.out.EnrollCardAuditPort;
+import com.lipa.application.port.out.EnrollCardLookupPort;
+import com.lipa.application.port.out.EnrollCardPersistencePort;
 import com.lipa.application.port.out.TimeProviderPort;
-import com.lipa.infrastructure.persistence.jpa.entity.AccountEntity;
-import com.lipa.infrastructure.persistence.jpa.entity.AuditEventEntity;
-import com.lipa.infrastructure.persistence.jpa.entity.CardEntity;
+import com.lipa.domain.model.Account;
+import com.lipa.domain.model.Card;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.Map;
 import java.util.UUID;
 
 @Service
 public class EnrollCardService implements EnrollCardUseCase {
 
-    private final AccountRepositoryPort accountRepository;
-    private final CardRepositoryPort cardRepository;
-    private final AuditRepositoryPort auditRepository;
+    private final EnrollCardLookupPort lookupPort;
+    private final EnrollCardPersistencePort persistencePort;
+    private final EnrollCardAuditPort auditPort;
     private final TimeProviderPort time;
 
-    public EnrollCardService(AccountRepositoryPort accountRepository,
-                             CardRepositoryPort cardRepository,
-                             AuditRepositoryPort auditRepository,
+    public EnrollCardService(EnrollCardLookupPort lookupPort,
+                             EnrollCardPersistencePort persistencePort,
+                             EnrollCardAuditPort auditPort,
                              TimeProviderPort time) {
-        this.accountRepository = accountRepository;
-        this.cardRepository = cardRepository;
-        this.auditRepository = auditRepository;
+        this.lookupPort = lookupPort;
+        this.persistencePort = persistencePort;
+        this.auditPort = auditPort;
         this.time = time;
     }
 
@@ -38,48 +40,31 @@ public class EnrollCardService implements EnrollCardUseCase {
     public Result enroll(Command command) {
         String uid = normalizeUid(command.cardUid());
 
-        cardRepository.findByUid(uid).ifPresent(existing -> {
+        if (lookupPort.existsByUid(uid)) {
             throw new BusinessRuleException("Card already enrolled for uid=" + uid);
-        });
+        }
 
-        AccountEntity account = new AccountEntity();
-        account.setType(AccountEntity.AccountType.CLIENT);
-        account.setStatus(AccountEntity.AccountStatus.ACTIVE);
-        account.setDisplayName(command.displayName());
-        account.setPhone(command.phone());
-        account.setCreatedAt(time.now());
-        account.setId(UUID.randomUUID());
+        Instant now = time.now();
 
-        account = accountRepository.save(account);
+        UUID accountId = UUID.randomUUID();
+        UUID cardId = UUID.randomUUID();
 
-        CardEntity card = new CardEntity();
-        card.setId(UUID.randomUUID());
-        card.setUid(uid);
-        card.setAccount(account);
-        card.setStatus(CardEntity.CardStatus.ACTIVE);
-        card.setPinHash(null);
-        card.setPinFailCount(0);
-        card.setPinBlockedUntil(null);
-        card.setCreatedAt(time.now());
-        card.setUpdatedAt(time.now());
+        Account account = Account.newClient(accountId, command.displayName(), command.phone(), now);
+        Card card = Card.enrolled(cardId, uid, accountId, now);
 
-        card = cardRepository.save(card);
+        EnrollCardPersistResult persisted = persistencePort.persist(new EnrollCardPersistCommand(account, card));
 
-        AuditEventEntity audit = new AuditEventEntity();
-        audit.setId(UUID.randomUUID());
-        audit.setActorType(AuditEventEntity.ActorType.SYSTEM);
-        audit.setActorId(null);
-        audit.setAction("CARD_ENROLLED");
-        audit.setTargetType(AuditEventEntity.TargetType.CARD);
-        audit.setTargetId(card.getId());
-        audit.setMetadata(Map.of(
-                "uid", uid,
-                "accountId", account.getId().toString()
-        ));
-        audit.setCreatedAt(time.now());
-        auditRepository.save(audit);
+        auditPort.record(
+                "CARD_ENROLLED",
+                persisted.cardId(),
+                Map.of(
+                        "uid", persisted.cardUid(),
+                        "accountId", persisted.accountId().toString()
+                ),
+                now
+        );
 
-        return new Result(account.getId(), card.getId(), card.getUid());
+        return new Result(persisted.accountId(), persisted.cardId(), persisted.cardUid());
     }
 
     private String normalizeUid(String uid) {

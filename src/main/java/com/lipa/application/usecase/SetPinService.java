@@ -1,35 +1,35 @@
 package com.lipa.application.usecase;
 
+import com.lipa.application.dto.SetPinCardSnapshot;
+import com.lipa.application.dto.SetPinCardUpdate;
 import com.lipa.application.exception.BusinessRuleException;
 import com.lipa.application.exception.NotFoundException;
 import com.lipa.application.port.in.SetPinUseCase;
-import com.lipa.application.port.out.AuditRepositoryPort;
-import com.lipa.application.port.out.CardRepositoryPort;
 import com.lipa.application.port.out.PinHasherPort;
+import com.lipa.application.port.out.SetPinAuditPort;
+import com.lipa.application.port.out.SetPinCardPort;
 import com.lipa.application.port.out.TimeProviderPort;
-import com.lipa.infrastructure.persistence.jpa.entity.AuditEventEntity;
-import com.lipa.infrastructure.persistence.jpa.entity.CardEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.Map;
-import java.util.UUID;
 
 @Service
 public class SetPinService implements SetPinUseCase {
 
-    private final CardRepositoryPort cardRepository;
+    private final SetPinCardPort cardPort;
     private final PinHasherPort hasher;
-    private final AuditRepositoryPort auditRepository;
+    private final SetPinAuditPort auditPort;
     private final TimeProviderPort time;
 
-    public SetPinService(CardRepositoryPort cardRepository,
+    public SetPinService(SetPinCardPort cardPort,
                          PinHasherPort hasher,
-                         AuditRepositoryPort auditRepository,
+                         SetPinAuditPort auditPort,
                          TimeProviderPort time) {
-        this.cardRepository = cardRepository;
+        this.cardPort = cardPort;
         this.hasher = hasher;
-        this.auditRepository = auditRepository;
+        this.auditPort = auditPort;
         this.time = time;
     }
 
@@ -39,32 +39,32 @@ public class SetPinService implements SetPinUseCase {
         String uid = normalizeUid(command.cardUid());
         validatePin(command.rawPin());
 
-        CardEntity card = cardRepository.findByUid(uid)
+        SetPinCardSnapshot card = cardPort.findByUid(uid)
                 .orElseThrow(() -> new NotFoundException("Card not found for uid=" + uid));
 
-        if (card.getStatus() != CardEntity.CardStatus.ACTIVE) {
+        if (!"ACTIVE".equalsIgnoreCase(card.status())) {
             throw new BusinessRuleException("Card is not active");
         }
 
-        card.setPinHash(hasher.hash(command.rawPin()));
-        card.setPinFailCount(0);
-        card.setPinBlockedUntil(null);
-        card.setUpdatedAt(time.now());
-        cardRepository.save(card);
+        Instant now = time.now();
 
-        AuditEventEntity audit = new AuditEventEntity();
-        audit.setId(UUID.randomUUID());
-        audit.setActorType(AuditEventEntity.ActorType.SYSTEM);
-        audit.setActorId(null);
-        audit.setAction("PIN_SET");
-        audit.setTargetType(AuditEventEntity.TargetType.CARD);
-        audit.setTargetId(card.getId());
-        audit.setMetadata(Map.of(
-                "uid", uid,
-                "reason", safeReason(command.reason())
+        cardPort.applyUpdate(new SetPinCardUpdate(
+                card.id(),
+                hasher.hash(command.rawPin()),
+                0,
+                null,
+                now
         ));
-        audit.setCreatedAt(time.now());
-        auditRepository.save(audit);
+
+        auditPort.record(
+                "PIN_SET",
+                card.id(),
+                Map.of(
+                        "uid", uid,
+                        "reason", safeReason(command.reason())
+                ),
+                now
+        );
     }
 
     private void validatePin(String pin) {
