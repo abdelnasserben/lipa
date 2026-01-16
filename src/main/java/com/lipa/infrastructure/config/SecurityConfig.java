@@ -27,8 +27,8 @@ public class SecurityConfig {
                         // Protected: cash-in (AGENT or ADMIN)
                         .requestMatchers(HttpMethod.POST, "/api/v1/transactions/cash-ins").hasAnyRole("AGENT", "ADMIN")
 
-                        // Back-office (lecture) : ADMIN uniquement
-                        .requestMatchers(HttpMethod.GET, "/api/v1/backoffice/**").hasRole("ADMIN")
+                        // Back-office : ADMIN uniquement (GET + POST)
+                        .requestMatchers("/api/v1/backoffice/**").hasRole("ADMIN")
 
                         // For now: keep the rest open to not slow MVP
                         .anyRequest().permitAll()
@@ -40,10 +40,6 @@ public class SecurityConfig {
         return http.build();
     }
 
-    /**
-     * Transforme le claim "role" du JWT en authority Spring:
-     * role=ADMIN -> ROLE_ADMIN, role=AGENT -> ROLE_AGENT
-     */
     @Bean
     JwtAuthenticationConverter jwtAuthenticationConverter() {
         JwtGrantedAuthoritiesConverter gac = new JwtGrantedAuthoritiesConverter();
