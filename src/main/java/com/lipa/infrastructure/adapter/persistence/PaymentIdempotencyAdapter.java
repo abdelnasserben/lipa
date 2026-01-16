@@ -8,17 +8,14 @@ import org.springframework.stereotype.Component;
 import java.util.Optional;
 
 @Component
-public class PaymentIdempotencyAdapter implements PaymentIdempotencyPort {
-
-    private final TransactionJpaRepository repo;
+public class PaymentIdempotencyAdapter extends AbstractJpaIdempotencyAdapter implements PaymentIdempotencyPort {
 
     public PaymentIdempotencyAdapter(TransactionJpaRepository repo) {
-        this.repo = repo;
+        super(repo);
     }
 
     @Override
     public Optional<IdempotentTransactionSnapshot> findByIdempotencyKey(String idempotencyKey) {
-        return repo.findByIdempotencyKey(idempotencyKey)
-                .map(t -> new IdempotentTransactionSnapshot(t.getId(), t.getStatus().name()));
+        return findInternal(idempotencyKey);
     }
 }

@@ -4,14 +4,10 @@ import com.lipa.application.exception.BusinessRuleException;
 import com.lipa.application.exception.NotFoundException;
 import com.lipa.application.port.in.ListAccountLedgerUseCase;
 import com.lipa.application.port.out.AccountHistoryQueryPort;
-import com.lipa.application.port.out.AccountLedgerAuditPort;
 import com.lipa.application.port.out.AccountLookupPort;
-import com.lipa.application.port.out.TimeProviderPort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
-import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -22,17 +18,11 @@ public class ListAccountLedgerService implements ListAccountLedgerUseCase {
 
     private final AccountLookupPort accountLookup;
     private final AccountHistoryQueryPort historyQuery;
-    private final AccountLedgerAuditPort audit;
-    private final TimeProviderPort time;
 
     public ListAccountLedgerService(AccountLookupPort accountLookup,
-                                    AccountHistoryQueryPort historyQuery,
-                                    AccountLedgerAuditPort audit,
-                                    TimeProviderPort time) {
+                                    AccountHistoryQueryPort historyQuery) {
         this.accountLookup = accountLookup;
         this.historyQuery = historyQuery;
-        this.audit = audit;
-        this.time = time;
     }
 
     @Override
@@ -63,19 +53,6 @@ public class ListAccountLedgerService implements ListAccountLedgerUseCase {
 
         int returned = items.size();
         int nextOffset = safeOffset + returned;
-
-        Instant now = time.now();
-        audit.record(
-                "LEDGER_VIEWED",
-                accountId,
-                Map.of(
-                        "limit", String.valueOf(safeLimit),
-                        "offset", String.valueOf(safeOffset),
-                        "returned", String.valueOf(returned),
-                        "nextOffset", String.valueOf(nextOffset)
-                ),
-                now
-        );
 
         return new Result(accountId, safeLimit, safeOffset, returned, nextOffset, items);
     }

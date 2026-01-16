@@ -2,6 +2,7 @@ package com.lipa.application.usecase;
 
 import com.lipa.application.dto.BackofficeTransactionSearchCriteria;
 import com.lipa.application.dto.BackofficeTransactionSearchResult;
+import com.lipa.application.dto.PageRequest;
 import com.lipa.application.port.in.SearchTransactionsBackofficeUseCase;
 import com.lipa.application.port.out.TransactionSearchQueryPort;
 import org.springframework.stereotype.Service;
@@ -21,6 +22,7 @@ public class SearchTransactionsBackofficeService implements SearchTransactionsBa
             int limit,
             int offset
     ) {
-        return queryPort.search(criteria, limit, offset);
+        PageRequest page = PageRequest.of(limit, offset);
+        return queryPort.search(criteria, page.limit(), page.offset());
     }
 }
