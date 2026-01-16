@@ -4,6 +4,7 @@ import com.lipa.api.dto.FeeConfigurationRequest;
 import com.lipa.api.dto.FeeConfigurationResponse;
 import com.lipa.application.port.in.GetCurrentFeeConfigurationUseCase;
 import com.lipa.application.port.in.UpdateFeeConfigurationUseCase;
+import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
@@ -32,7 +33,7 @@ public class FeeConfigurationController {
     }
 
     @PutMapping("/current")
-    public FeeConfigurationResponse update(@RequestBody FeeConfigurationRequest request) {
+    public FeeConfigurationResponse update(@Valid @RequestBody FeeConfigurationRequest request) {
         var res = updateUseCase.update(new UpdateFeeConfigurationUseCase.Command(
                 request.percentage(),
                 request.minAmount(),

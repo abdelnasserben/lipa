@@ -2,13 +2,11 @@ package com.lipa.infrastructure.adapter.persistence;
 
 import com.lipa.application.dto.PaymentPersistCommand;
 import com.lipa.application.dto.PaymentPersistResult;
+import com.lipa.application.exception.NotFoundException;
 import com.lipa.application.port.out.PaymentPersistencePort;
-import com.lipa.application.util.FeeCalculator;
-import com.lipa.infrastructure.persistence.jpa.entity.AccountEntity;
 import com.lipa.infrastructure.persistence.jpa.entity.LedgerEntryEntity;
 import com.lipa.infrastructure.persistence.jpa.entity.TransactionEntity;
 import com.lipa.infrastructure.persistence.jpa.repo.AccountJpaRepository;
-import com.lipa.infrastructure.persistence.jpa.repo.FeeConfigurationJpaRepository;
 import com.lipa.infrastructure.persistence.jpa.repo.LedgerEntryJpaRepository;
 import com.lipa.infrastructure.persistence.jpa.repo.TransactionJpaRepository;
 import org.springframework.stereotype.Component;
@@ -19,47 +17,34 @@ import java.util.UUID;
 @Component
 public class PaymentPersistenceAdapter implements PaymentPersistencePort {
 
-    private static final String PLATFORM_FEES_DISPLAY_NAME = "Platform Fees";
-
     private final AccountJpaRepository accountRepo;
     private final TransactionJpaRepository transactionRepo;
     private final LedgerEntryJpaRepository ledgerRepo;
-    private final FeeConfigurationJpaRepository feeRepo;
+    private final PlatformFeeEngine feeEngine;
 
     public PaymentPersistenceAdapter(AccountJpaRepository accountRepo,
                                      TransactionJpaRepository transactionRepo,
                                      LedgerEntryJpaRepository ledgerRepo,
-                                     FeeConfigurationJpaRepository feeRepo) {
+                                     PlatformFeeEngine feeEngine) {
         this.accountRepo = accountRepo;
         this.transactionRepo = transactionRepo;
         this.ledgerRepo = ledgerRepo;
-        this.feeRepo = feeRepo;
+        this.feeEngine = feeEngine;
     }
 
     @Override
     public PaymentPersistResult persist(PaymentPersistCommand command) {
 
         var payer = accountRepo.findById(command.payerAccountId())
-                .orElseThrow(() -> new IllegalStateException("Payer account missing id=" + command.payerAccountId()));
+                .orElseThrow(() -> new NotFoundException("Payer account not found id=" + command.payerAccountId()));
 
         var merchant = accountRepo.findById(command.merchantAccountId())
-                .orElseThrow(() -> new IllegalStateException("Merchant account missing id=" + command.merchantAccountId()));
+                .orElseThrow(() -> new NotFoundException("Merchant account not found id=" + command.merchantAccountId()));
 
-        // 1) Load active fee config
-        var fee = feeRepo.findByActiveTrue()
-                .orElseThrow(() -> new IllegalStateException("Active fee missing"));
-
-        // 2) Fee amount (percentage + min/max)
-        BigDecimal feeAmount = FeeCalculator.calculate(
-                command.amount(),
-                fee.getPercentage(),
-                fee.getMinAmount(),
-                fee.getMaxAmount()
-        );
-
-        // 3) Load fee technical account (TECHNICAL + displayName = "Platform Fees")
-        var feeAccount = accountRepo.findByTypeAndDisplayName(AccountEntity.AccountType.TECHNICAL, PLATFORM_FEES_DISPLAY_NAME)
-                .orElseThrow(() -> new IllegalStateException("Fee account missing type=TECHNICAL displayName=" + PLATFORM_FEES_DISPLAY_NAME));
+        // Fees (DRY) : config active + calcul + fee account
+        var feeComputed = feeEngine.compute(command.amount());
+        BigDecimal feeAmount = feeComputed.feeAmount();
+        var feeAccount = feeComputed.feeAccount();
 
         // Transaction (keeps amount = payment amount, not total)
         TransactionEntity txn = new TransactionEntity();
