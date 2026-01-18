@@ -1,6 +1,6 @@
 package com.lipa.application.port.out;
 
-import com.lipa.infrastructure.persistence.jpa.entity.TransactionEntity;
+import com.lipa.infrastructure.persistence.entity.TransactionEntity;
 
 import java.util.Optional;
 import java.util.UUID;

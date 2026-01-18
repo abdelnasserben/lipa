@@ -51,6 +51,101 @@ public final class Card {
         );
     }
 
+    /**
+     * Reconstruit une carte depuis persistance (immutable).
+     */
+    public static Card restored(UUID id,
+                                String uid,
+                                UUID accountId,
+                                CardStatus status,
+                                String pinHash,
+                                int pinFailCount,
+                                Instant pinBlockedUntil,
+                                Instant createdAt,
+                                Instant updatedAt) {
+        return new Card(
+                id,
+                uid,
+                accountId,
+                status,
+                pinHash,
+                pinFailCount,
+                pinBlockedUntil,
+                createdAt,
+                updatedAt
+        );
+    }
+
+    public Card withPinSet(String newPinHash, Instant now) {
+        return new Card(
+                this.id,
+                this.uid,
+                this.accountId,
+                this.status,
+                newPinHash,
+                0,
+                null,
+                this.createdAt,
+                now
+        );
+    }
+
+    /**
+     * Décide métier d'une tentative PIN.
+     * @param pinMatches résultat technique (hasher.matches) fourni par l'application
+     */
+    public PinVerification verifyPinAttempt(boolean pinMatches, PinPolicy policy, Instant now) {
+        if (status != CardStatus.ACTIVE) {
+            return new PinVerification(false, true, this, null);
+        }
+
+        if (pinBlockedUntil != null && now.isBefore(pinBlockedUntil)) {
+            return new PinVerification(false, true, this, pinBlockedUntil);
+        }
+
+        if (pinHash == null || pinHash.isBlank()) {
+            return new PinVerification(false, false, this, null);
+        }
+
+        if (pinMatches) {
+            Card updated = new Card(
+                    this.id,
+                    this.uid,
+                    this.accountId,
+                    this.status,
+                    this.pinHash,
+                    0,
+                    null,
+                    this.createdAt,
+                    now
+            );
+            return new PinVerification(true, false, updated, null);
+        }
+
+        int newFails = this.pinFailCount + 1;
+        Instant blockedUntil = null;
+        boolean blocked = false;
+
+        if (newFails >= policy.maxFails()) {
+            blocked = true;
+            blockedUntil = now.plus(policy.blockDuration());
+        }
+
+        Card updated = new Card(
+                this.id,
+                this.uid,
+                this.accountId,
+                this.status,
+                this.pinHash,
+                newFails,
+                blockedUntil,
+                this.createdAt,
+                now
+        );
+
+        return new PinVerification(false, blocked, updated, blockedUntil);
+    }
+
     public UUID id() {
         return id;
     }

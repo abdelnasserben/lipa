@@ -1,6 +1,6 @@
 package com.lipa.infrastructure.security;
 
-import com.lipa.infrastructure.persistence.jpa.entity.AgentUserEntity;
+import com.lipa.infrastructure.persistence.entity.AgentUserEntity;
 import com.nimbusds.jose.jwk.source.ImmutableSecret;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;

@@ -2,8 +2,7 @@ package com.lipa.application.usecase;
 
 import com.lipa.application.exception.BusinessRuleException;
 import com.lipa.application.port.in.CreateAgentUserUseCase;
-import com.lipa.application.port.out.AgentUserLookupPort;
-import com.lipa.application.port.out.AgentUserPersistencePort;
+import com.lipa.application.port.out.AgentUserRepositoryPort;
 import com.lipa.application.port.out.PasswordHasherPort;
 import com.lipa.application.port.out.TimeProviderPort;
 import org.junit.jupiter.api.BeforeEach;
@@ -26,19 +25,18 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class CreateAgentUserServiceTest {
 
-    @Mock AgentUserLookupPort lookupPort;
-    @Mock AgentUserPersistencePort persistencePort;
+    @Mock AgentUserRepositoryPort agentUsers;
     @Mock PasswordHasherPort passwordHasher;
     @Mock TimeProviderPort time;
 
-    @Captor ArgumentCaptor<AgentUserPersistencePort.CreateUserCommand> persistCaptor;
+    @Captor ArgumentCaptor<AgentUserRepositoryPort.CreateUserCommand> persistCaptor;
 
     private CreateAgentUserService service;
     private Instant now;
 
     @BeforeEach
     void setUp() {
-        service = new CreateAgentUserService(lookupPort, persistencePort, passwordHasher, time);
+        service = new CreateAgentUserService(agentUsers, passwordHasher, time);
         now = Instant.parse("2026-01-16T10:15:30Z");
     }
 
@@ -64,23 +62,23 @@ class CreateAgentUserServiceTest {
 
     @Test
     void create_user_fails_if_username_already_exists() {
-        when(lookupPort.findByUsername("john")).thenReturn(Optional.of(UUID.randomUUID()));
+        when(agentUsers.findIdByUsername("john")).thenReturn(Optional.of(UUID.randomUUID()));
 
         assertThrows(BusinessRuleException.class, () ->
                 service.create(new CreateAgentUserUseCase.Command("  john  ", "pass", "AGENT"))
         );
 
-        verify(persistencePort, never()).create(any());
+        verify(agentUsers, never()).create(any());
     }
 
     @Test
     void create_user_happy_path_hashes_password_and_persists() {
         when(time.now()).thenReturn(now);
 
-        when(lookupPort.findByUsername("john")).thenReturn(Optional.empty());
+        when(agentUsers.findIdByUsername("john")).thenReturn(Optional.empty());
         when(passwordHasher.hash("pass")).thenReturn("HASHED");
         UUID newId = UUID.randomUUID();
-        when(persistencePort.create(any())).thenReturn(newId);
+        when(agentUsers.create(any())).thenReturn(newId);
 
         CreateAgentUserUseCase.Result res = service.create(
                 new CreateAgentUserUseCase.Command("  john  ", "pass", "ADMIN")
@@ -92,13 +90,13 @@ class CreateAgentUserServiceTest {
         assertEquals("ACTIVE", res.status());
         assertEquals(now, res.createdAt());
 
-        verify(persistencePort).create(persistCaptor.capture());
+        verify(agentUsers).create(persistCaptor.capture());
         var cmd = persistCaptor.getValue();
 
         assertEquals("john", cmd.username());
         assertEquals("HASHED", cmd.passwordHash());
-        assertEquals(AgentUserPersistencePort.Role.ADMIN, cmd.role());
-        assertEquals(AgentUserPersistencePort.Status.ACTIVE, cmd.status());
+        assertEquals(AgentUserRepositoryPort.Role.ADMIN, cmd.role());
+        assertEquals(AgentUserRepositoryPort.Status.ACTIVE, cmd.status());
         assertEquals(now, cmd.now());
     }
 }

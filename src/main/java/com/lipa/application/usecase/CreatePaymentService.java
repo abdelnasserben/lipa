@@ -1,6 +1,6 @@
 package com.lipa.application.usecase;
 
-import com.lipa.application.dto.*;
+import com.lipa.application.dto.AccountSnapshot;
 import com.lipa.application.exception.BusinessRuleException;
 import com.lipa.application.exception.NotFoundException;
 import com.lipa.application.port.in.CreatePaymentUseCase;
@@ -23,9 +23,11 @@ public class CreatePaymentService implements CreatePaymentUseCase {
 
     private final PaymentIdempotencyPort idempotencyPort;
     private final VerifyPinUseCase verifyPinUseCase;
-    private final PaymentCardPort cardPort;
-    private final PaymentAccountPort accountPort;
-    private final PaymentLedgerPort ledgerPort;
+
+    private final CardRepositoryPort cards;
+    private final AccountSnapshotPort accounts;
+    private final AccountReadPort ledger; // includes AccountBalancePort
+
     private final PaymentPersistencePort persistencePort;
     private final PaymentFeePort paymentFeePort;
     private final PaymentAuditPort auditPort;
@@ -33,17 +35,18 @@ public class CreatePaymentService implements CreatePaymentUseCase {
 
     public CreatePaymentService(PaymentIdempotencyPort idempotencyPort,
                                 VerifyPinUseCase verifyPinUseCase,
-                                PaymentCardPort cardPort,
-                                PaymentAccountPort accountPort,
-                                PaymentLedgerPort ledgerPort,
-                                PaymentPersistencePort persistencePort, PaymentFeePort paymentFeePort,
+                                CardRepositoryPort cards,
+                                AccountSnapshotPort accounts,
+                                AccountReadPort ledger,
+                                PaymentPersistencePort persistencePort,
+                                PaymentFeePort paymentFeePort,
                                 PaymentAuditPort auditPort,
                                 TimeProviderPort time) {
         this.idempotencyPort = idempotencyPort;
         this.verifyPinUseCase = verifyPinUseCase;
-        this.cardPort = cardPort;
-        this.accountPort = accountPort;
-        this.ledgerPort = ledgerPort;
+        this.cards = cards;
+        this.accounts = accounts;
+        this.ledger = ledger;
         this.persistencePort = persistencePort;
         this.paymentFeePort = paymentFeePort;
         this.auditPort = auditPort;
@@ -66,10 +69,10 @@ public class CreatePaymentService implements CreatePaymentUseCase {
         }
 
         // 2) Load card AFTER PIN (still validate card status + linked account)
-        CardSnapshot card = cardPort.findByUid(v.cardUid)
+        var card = cards.findByUid(v.cardUid)
                 .orElseThrow(() -> new NotFoundException("Card not found for uid=" + v.cardUid));
 
-        DomainRules.requireStatusActive("Card", card.status());
+        DomainRules.requireStatusActive("Card", card.status().name());
         DomainRules.requireNotNull(card.accountId(), "Card has no account linked");
 
         UUID payerId = card.accountId();
@@ -81,21 +84,21 @@ public class CreatePaymentService implements CreatePaymentUseCase {
         }
 
         // 4) Lock payer account + status checks
-        AccountSnapshot payer = accountPort.findByIdForUpdate(payerId)
+        AccountSnapshot payer = accounts.findByIdForUpdate(payerId)
                 .orElseThrow(() -> new NotFoundException("Payer account not found id=" + payerId));
         DomainRules.requireStatusActive("Payer account", payer.status());
 
-        AccountSnapshot merchant = accountPort.findById(command.merchantAccountId())
+        AccountSnapshot merchant = accounts.findById(command.merchantAccountId())
                 .orElseThrow(() -> new NotFoundException("Merchant account not found id=" + command.merchantAccountId()));
         DomainRules.requireStatusActive("Merchant account", merchant.status());
 
         // 5) Balance check (DRY)
-        BigDecimal balance = BalanceCalculator.balanceOf(ledgerPort, payerId);
+        BigDecimal balance = BalanceCalculator.balanceOf(ledger, payerId);
         BigDecimal fee = paymentFeePort.quote(command.amount()).feeAmount();
         BigDecimal amountWithFee = command.amount().add(fee);
 
         if (balance.compareTo(amountWithFee) < 0) {
-            auditPort.record(new PaymentAuditCommand(
+            auditPort.record(new PaymentAuditPort.Command(
                     "CLIENT",
                     payerId,
                     "PAYMENT_REFUSED_INSUFFICIENT_FUNDS",
@@ -115,7 +118,7 @@ public class CreatePaymentService implements CreatePaymentUseCase {
         }
 
         // 6) Persist transaction + ledger
-        PaymentPersistResult persisted = persistencePort.persist(new PaymentPersistCommand(
+        var persisted = persistencePort.persist(new PaymentPersistencePort.PersistCommand(
                 payerId,
                 command.merchantAccountId(),
                 command.amount(),
@@ -126,7 +129,7 @@ public class CreatePaymentService implements CreatePaymentUseCase {
         ));
 
         // 7) Audit success
-        auditPort.record(new PaymentAuditCommand(
+        auditPort.record(new PaymentAuditPort.Command(
                 "CLIENT",
                 payerId,
                 "PAYMENT_CREATED",
@@ -163,6 +166,5 @@ public class CreatePaymentService implements CreatePaymentUseCase {
         return new Validated(cardUid, pin, currency, idemKey, description);
     }
 
-    private record Validated(String cardUid, String pin, String currency, String idempotencyKey, String description) {
-    }
+    private record Validated(String cardUid, String pin, String currency, String idempotencyKey, String description) {}
 }

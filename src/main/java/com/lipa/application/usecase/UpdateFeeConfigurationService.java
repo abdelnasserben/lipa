@@ -2,54 +2,51 @@ package com.lipa.application.usecase;
 
 import com.lipa.application.exception.BusinessRuleException;
 import com.lipa.application.port.in.UpdateFeeConfigurationUseCase;
-import com.lipa.application.port.out.FeeConfigurationAdminPort;
+import com.lipa.application.port.out.FeeConfigurationRepositoryPort;
 import com.lipa.application.port.out.TimeProviderPort;
-import com.lipa.application.util.MoneyRules;
+import com.lipa.domain.fees.FeeConfiguration;
+import com.lipa.domain.fees.FeeConfigurationValidationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class UpdateFeeConfigurationService implements UpdateFeeConfigurationUseCase {
 
-    private final FeeConfigurationAdminPort port;
+    private final FeeConfigurationRepositoryPort repo;
     private final TimeProviderPort time;
 
-    public UpdateFeeConfigurationService(FeeConfigurationAdminPort port, TimeProviderPort time) {
-        this.port = port;
+    public UpdateFeeConfigurationService(FeeConfigurationRepositoryPort repo, TimeProviderPort time) {
+        this.repo = repo;
         this.time = time;
     }
 
     @Override
     @Transactional
     public Result update(Command command) {
-
-        if (command.percentage() == null || command.percentage().signum() < 0) {
-            throw new BusinessRuleException("Invalid percentage");
-        }
-
-        MoneyRules.requirePositive(command.minAmount(), "minAmount");
-        MoneyRules.requirePositive(command.maxAmount(), "maxAmount");
-
-        if (command.minAmount().compareTo(command.maxAmount()) > 0) {
-            throw new BusinessRuleException("minAmount must be <= maxAmount");
-        }
-
         var updatedAt = time.now();
 
-        port.updateActive(
-                command.percentage(),
-                command.minAmount(),
-                command.maxAmount(),
-                command.currency(),
-                updatedAt
-        );
+        final FeeConfiguration cfg;
+        try {
+            cfg = FeeConfiguration.of(
+                    command.percentage(),
+                    command.minAmount(),
+                    command.maxAmount(),
+                    command.currency(),
+                    updatedAt
+            );
+        } catch (FeeConfigurationValidationException ex) {
+            // Preserve API behavior: BusinessRuleException -> 400 via ApiExceptionHandler
+            throw new BusinessRuleException(ex.getMessage());
+        }
+
+        repo.upsertActive(cfg);
 
         return new Result(
-                command.percentage(),
-                command.minAmount(),
-                command.maxAmount(),
-                command.currency(),
-                updatedAt
+                cfg.percentage(),
+                cfg.minAmount(),
+                cfg.maxAmount(),
+                cfg.currency(),
+                cfg.updatedAt()
         );
     }
 }

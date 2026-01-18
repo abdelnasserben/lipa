@@ -1,13 +1,11 @@
 package com.lipa.application.usecase;
 
-import com.lipa.application.dto.SetPinCardSnapshot;
-import com.lipa.application.dto.SetPinCardUpdate;
 import com.lipa.application.exception.BusinessRuleException;
 import com.lipa.application.exception.NotFoundException;
 import com.lipa.application.port.in.SetPinUseCase;
+import com.lipa.application.port.out.CardRepositoryPort;
 import com.lipa.application.port.out.PinHasherPort;
 import com.lipa.application.port.out.SetPinAuditPort;
-import com.lipa.application.port.out.SetPinCardPort;
 import com.lipa.application.port.out.TimeProviderPort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,16 +16,16 @@ import java.util.Map;
 @Service
 public class SetPinService implements SetPinUseCase {
 
-    private final SetPinCardPort cardPort;
+    private final CardRepositoryPort cards;
     private final PinHasherPort hasher;
     private final SetPinAuditPort auditPort;
     private final TimeProviderPort time;
 
-    public SetPinService(SetPinCardPort cardPort,
+    public SetPinService(CardRepositoryPort cards,
                          PinHasherPort hasher,
                          SetPinAuditPort auditPort,
                          TimeProviderPort time) {
-        this.cardPort = cardPort;
+        this.cards = cards;
         this.hasher = hasher;
         this.auditPort = auditPort;
         this.time = time;
@@ -39,26 +37,21 @@ public class SetPinService implements SetPinUseCase {
         String uid = normalizeUid(command.cardUid());
         validatePin(command.rawPin());
 
-        SetPinCardSnapshot card = cardPort.findByUid(uid)
+        var card = cards.findByUid(uid)
                 .orElseThrow(() -> new NotFoundException("Card not found for uid=" + uid));
 
-        if (!"ACTIVE".equalsIgnoreCase(card.status())) {
+        if (!"ACTIVE".equalsIgnoreCase(card.status().name())) {
             throw new BusinessRuleException("Card is not active");
         }
 
         Instant now = time.now();
 
-        cardPort.applyUpdate(new SetPinCardUpdate(
-                card.id(),
-                hasher.hash(command.rawPin()),
-                0,
-                null,
-                now
-        ));
+        var updated = card.withPinSet(hasher.hash(command.rawPin()), now);
+        cards.save(updated);
 
         auditPort.record(
                 "PIN_SET",
-                card.id(),
+                updated.id(),
                 Map.of(
                         "uid", uid,
                         "reason", safeReason(command.reason())

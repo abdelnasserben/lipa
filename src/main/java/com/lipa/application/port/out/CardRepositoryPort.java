@@ -1,12 +1,24 @@
 package com.lipa.application.port.out;
 
-import com.lipa.infrastructure.persistence.jpa.entity.CardEntity;
+import com.lipa.domain.model.Account;
+import com.lipa.domain.model.Card;
 
 import java.util.Optional;
-import java.util.UUID;
 
 public interface CardRepositoryPort {
-    CardEntity save(CardEntity entity);
-    Optional<CardEntity> findByUid(String uid);
-    Optional<CardEntity> findById(UUID id);
+
+    boolean existsByUid(String uid);
+
+    Optional<Card> findByUid(String uid);
+
+    /**
+     * Persiste un nouvel account + une nouvelle carte (enroll).
+     * (On garde cette granularité pour minimiser le changement ; extraction possible plus tard.)
+     */
+    void createAccountAndCard(Account account, Card card);
+
+    /**
+     * Persiste l'état de la carte (PIN state / status / etc.).
+     */
+    void save(Card card);
 }

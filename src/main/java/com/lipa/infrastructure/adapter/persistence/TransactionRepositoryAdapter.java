@@ -1,8 +1,8 @@
 package com.lipa.infrastructure.adapter.persistence;
 
 import com.lipa.application.port.out.TransactionRepositoryPort;
-import com.lipa.infrastructure.persistence.jpa.entity.TransactionEntity;
-import com.lipa.infrastructure.persistence.jpa.repo.TransactionJpaRepository;
+import com.lipa.infrastructure.persistence.entity.TransactionEntity;
+import com.lipa.infrastructure.persistence.repo.TransactionJpaRepository;
 import org.springframework.stereotype.Component;
 
 import java.util.Optional;

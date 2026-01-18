@@ -4,9 +4,9 @@ import com.lipa.application.dto.BackofficeTransactionItemDto;
 import com.lipa.application.dto.BackofficeTransactionSearchCriteria;
 import com.lipa.application.dto.BackofficeTransactionSearchResult;
 import com.lipa.application.port.out.TransactionSearchQueryPort;
-import com.lipa.infrastructure.persistence.jpa.entity.TransactionEntity;
-import com.lipa.infrastructure.persistence.jpa.repo.TransactionSearchJpaRepository;
-import com.lipa.infrastructure.persistence.jpa.support.OffsetBasedPageRequest;
+import com.lipa.infrastructure.persistence.entity.TransactionEntity;
+import com.lipa.infrastructure.persistence.repo.TransactionSearchJpaRepository;
+import com.lipa.infrastructure.persistence.support.OffsetBasedPageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Component;
 

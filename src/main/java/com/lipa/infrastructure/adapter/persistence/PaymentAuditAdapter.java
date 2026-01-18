@@ -1,9 +1,8 @@
 package com.lipa.infrastructure.adapter.persistence;
 
-import com.lipa.application.dto.PaymentAuditCommand;
 import com.lipa.application.port.out.PaymentAuditPort;
-import com.lipa.infrastructure.persistence.jpa.entity.AuditEventEntity;
-import com.lipa.infrastructure.persistence.jpa.repo.AuditEventJpaRepository;
+import com.lipa.infrastructure.persistence.entity.AuditEventEntity;
+import com.lipa.infrastructure.persistence.repo.AuditEventJpaRepository;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
@@ -18,7 +17,7 @@ public class PaymentAuditAdapter implements PaymentAuditPort {
     }
 
     @Override
-    public void record(PaymentAuditCommand command) {
+    public void record(Command command) {
         AuditEventEntity audit = new AuditEventEntity();
         audit.setId(UUID.randomUUID());
 

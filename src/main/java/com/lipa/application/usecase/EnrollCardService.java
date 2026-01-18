@@ -1,12 +1,9 @@
 package com.lipa.application.usecase;
 
-import com.lipa.application.dto.EnrollCardPersistCommand;
-import com.lipa.application.dto.EnrollCardPersistResult;
 import com.lipa.application.exception.BusinessRuleException;
 import com.lipa.application.port.in.EnrollCardUseCase;
+import com.lipa.application.port.out.CardRepositoryPort;
 import com.lipa.application.port.out.EnrollCardAuditPort;
-import com.lipa.application.port.out.EnrollCardLookupPort;
-import com.lipa.application.port.out.EnrollCardPersistencePort;
 import com.lipa.application.port.out.TimeProviderPort;
 import com.lipa.domain.model.Account;
 import com.lipa.domain.model.Card;
@@ -20,17 +17,14 @@ import java.util.UUID;
 @Service
 public class EnrollCardService implements EnrollCardUseCase {
 
-    private final EnrollCardLookupPort lookupPort;
-    private final EnrollCardPersistencePort persistencePort;
+    private final CardRepositoryPort cards;
     private final EnrollCardAuditPort auditPort;
     private final TimeProviderPort time;
 
-    public EnrollCardService(EnrollCardLookupPort lookupPort,
-                             EnrollCardPersistencePort persistencePort,
+    public EnrollCardService(CardRepositoryPort cards,
                              EnrollCardAuditPort auditPort,
                              TimeProviderPort time) {
-        this.lookupPort = lookupPort;
-        this.persistencePort = persistencePort;
+        this.cards = cards;
         this.auditPort = auditPort;
         this.time = time;
     }
@@ -40,7 +34,7 @@ public class EnrollCardService implements EnrollCardUseCase {
     public Result enroll(Command command) {
         String uid = normalizeUid(command.cardUid());
 
-        if (lookupPort.existsByUid(uid)) {
+        if (cards.existsByUid(uid)) {
             throw new BusinessRuleException("Card already enrolled for uid=" + uid);
         }
 
@@ -52,19 +46,19 @@ public class EnrollCardService implements EnrollCardUseCase {
         Account account = Account.newClient(accountId, command.displayName(), command.phone(), now);
         Card card = Card.enrolled(cardId, uid, accountId, now);
 
-        EnrollCardPersistResult persisted = persistencePort.persist(new EnrollCardPersistCommand(account, card));
+        cards.createAccountAndCard(account, card);
 
         auditPort.record(
                 "CARD_ENROLLED",
-                persisted.cardId(),
+                cardId,
                 Map.of(
-                        "uid", persisted.cardUid(),
-                        "accountId", persisted.accountId().toString()
+                        "uid", uid,
+                        "accountId", accountId.toString()
                 ),
                 now
         );
 
-        return new Result(persisted.accountId(), persisted.cardId(), persisted.cardUid());
+        return new Result(accountId, cardId, uid);
     }
 
     private String normalizeUid(String uid) {

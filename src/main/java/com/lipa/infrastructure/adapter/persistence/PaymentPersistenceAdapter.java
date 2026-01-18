@@ -1,14 +1,12 @@
 package com.lipa.infrastructure.adapter.persistence;
 
-import com.lipa.application.dto.PaymentPersistCommand;
-import com.lipa.application.dto.PaymentPersistResult;
 import com.lipa.application.exception.NotFoundException;
 import com.lipa.application.port.out.PaymentPersistencePort;
-import com.lipa.infrastructure.persistence.jpa.entity.LedgerEntryEntity;
-import com.lipa.infrastructure.persistence.jpa.entity.TransactionEntity;
-import com.lipa.infrastructure.persistence.jpa.repo.AccountJpaRepository;
-import com.lipa.infrastructure.persistence.jpa.repo.LedgerEntryJpaRepository;
-import com.lipa.infrastructure.persistence.jpa.repo.TransactionJpaRepository;
+import com.lipa.infrastructure.persistence.entity.LedgerEntryEntity;
+import com.lipa.infrastructure.persistence.entity.TransactionEntity;
+import com.lipa.infrastructure.persistence.repo.AccountJpaRepository;
+import com.lipa.infrastructure.persistence.repo.LedgerEntryJpaRepository;
+import com.lipa.infrastructure.persistence.repo.TransactionJpaRepository;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -33,7 +31,7 @@ public class PaymentPersistenceAdapter implements PaymentPersistencePort {
     }
 
     @Override
-    public PaymentPersistResult persist(PaymentPersistCommand command) {
+    public PersistResult persist(PersistCommand command) {
 
         var payer = accountRepo.findById(command.payerAccountId())
                 .orElseThrow(() -> new NotFoundException("Payer account not found id=" + command.payerAccountId()));
@@ -89,6 +87,6 @@ public class PaymentPersistenceAdapter implements PaymentPersistencePort {
         creditFee.setCreatedAt(command.createdAt());
         ledgerRepo.save(creditFee);
 
-        return new PaymentPersistResult(txn.getId(), txn.getStatus().name());
+        return new PersistResult(txn.getId(), txn.getStatus().name());
     }
 }

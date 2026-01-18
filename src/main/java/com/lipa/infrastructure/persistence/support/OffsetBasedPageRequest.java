@@ -1,0 +1,73 @@
+package com.lipa.infrastructure.persistence.support;
+
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+
+import java.io.Serial;
+import java.io.Serializable;
+
+public class OffsetBasedPageRequest implements Pageable, Serializable {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
+
+    private final int limit;
+    private final long offset;
+    private final Sort sort;
+
+    public OffsetBasedPageRequest(long offset, int limit, Sort sort) {
+        if (offset < 0) throw new IllegalArgumentException("Offset must not be negative");
+        if (limit < 1) throw new IllegalArgumentException("Limit must be greater than 0");
+        this.limit = limit;
+        this.offset = offset;
+        this.sort = (sort == null) ? Sort.unsorted() : sort;
+    }
+
+    @Override
+    public int getPageNumber() {
+        // pageNumber est calculé, mais on ne l'utilise pas vraiment
+        return (int) (offset / limit);
+    }
+
+    @Override
+    public int getPageSize() {
+        return limit;
+    }
+
+    @Override
+    public long getOffset() {
+        return offset;
+    }
+
+    @Override
+    public Sort getSort() {
+        return sort;
+    }
+
+    @Override
+    public Pageable next() {
+        return new OffsetBasedPageRequest(getOffset() + getPageSize(), getPageSize(), getSort());
+    }
+
+    @Override
+    public Pageable previousOrFirst() {
+        long newOffset = Math.max(getOffset() - getPageSize(), 0);
+        return new OffsetBasedPageRequest(newOffset, getPageSize(), getSort());
+    }
+
+    @Override
+    public Pageable first() {
+        return new OffsetBasedPageRequest(0, getPageSize(), getSort());
+    }
+
+    @Override
+    public Pageable withPage(int pageNumber) {
+        if (pageNumber < 0) throw new IllegalArgumentException("Page index must not be negative");
+        return new OffsetBasedPageRequest((long) pageNumber * getPageSize(), getPageSize(), getSort());
+    }
+
+    @Override
+    public boolean hasPrevious() {
+        return offset > 0;
+    }
+}

@@ -1,8 +1,7 @@
 package com.lipa.api.controller;
 
-import com.lipa.api.dto.BackofficeTransactionItem;
-import com.lipa.api.dto.BackofficeTransactionSearchResponse;
 import com.lipa.application.dto.BackofficeTransactionSearchCriteria;
+import com.lipa.application.dto.BackofficeTransactionSearchResult;
 import com.lipa.application.port.in.SearchTransactionsBackofficeUseCase;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,7 +23,7 @@ public class BackofficeTransactionController {
     }
 
     @GetMapping
-    public BackofficeTransactionSearchResponse search(
+    public BackofficeTransactionSearchResult search(
             @RequestParam(required = false) UUID accountId,
             @RequestParam(required = false) String type,
             @RequestParam(required = false) String status,
@@ -40,22 +39,6 @@ public class BackofficeTransactionController {
         if (offset < 0) offset = 0;
 
         var criteria = new BackofficeTransactionSearchCriteria(accountId, type, status, idempotencyKey, from, to);
-
-        var result = useCase.search(criteria, limit, offset);
-
-        var apiItems = result.items().stream()
-                .map(i -> new BackofficeTransactionItem(
-                        i.id(),
-                        i.type(),
-                        i.status(),
-                        i.amount(),
-                        i.currency(),
-                        i.idempotencyKey(),
-                        i.description(),
-                        i.createdAt()
-                ))
-                .toList();
-
-        return new BackofficeTransactionSearchResponse(result.limit(), result.offset(), result.total(), apiItems);
+        return useCase.search(criteria, limit, offset);
     }
 }

@@ -2,8 +2,7 @@ package com.lipa.api.controller;
 
 import com.lipa.api.dto.LoginRequest;
 import com.lipa.api.dto.LoginResponse;
-import com.lipa.application.port.out.TimeProviderPort;
-import com.lipa.infrastructure.security.AuthService;
+import com.lipa.application.port.in.LoginUseCase;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
@@ -12,28 +11,25 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/v1/auth")
 public class AuthController {
 
-    private final AuthService authService;
-    private final TimeProviderPort time;
+    private final LoginUseCase loginUseCase;
 
-    public AuthController(AuthService authService, TimeProviderPort time) {
-        this.authService = authService;
-        this.time = time;
+    public AuthController(LoginUseCase loginUseCase) {
+        this.loginUseCase = loginUseCase;
     }
 
     @PostMapping("/login")
     @ResponseStatus(HttpStatus.OK)
     public LoginResponse login(@RequestBody @Valid LoginRequest request) {
-        var now = time.now();
-        var result = authService.login(request.username(), request.password(), now);
+        var res = loginUseCase.login(new LoginUseCase.Command(request.username(), request.password()));
 
         return new LoginResponse(
-                result.accessToken(),
-                "Bearer",
-                result.expiresInSeconds(),
-                result.username(),
-                result.role(),
-                result.issuedAt(),
-                result.expiresAt()
+                res.accessToken(),
+                res.tokenType(),
+                res.expiresInSeconds(),
+                res.username(),
+                res.role(),
+                res.issuedAt(),
+                res.expiresAt()
         );
     }
 }

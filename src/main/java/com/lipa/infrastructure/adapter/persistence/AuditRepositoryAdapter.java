@@ -1,8 +1,8 @@
 package com.lipa.infrastructure.adapter.persistence;
 
 import com.lipa.application.port.out.AuditRepositoryPort;
-import com.lipa.infrastructure.persistence.jpa.entity.AuditEventEntity;
-import com.lipa.infrastructure.persistence.jpa.repo.AuditEventJpaRepository;
+import com.lipa.infrastructure.persistence.entity.AuditEventEntity;
+import com.lipa.infrastructure.persistence.repo.AuditEventJpaRepository;
 import org.springframework.stereotype.Component;
 
 @Component

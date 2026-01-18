@@ -3,8 +3,7 @@ package com.lipa.application.usecase;
 import com.lipa.application.exception.BusinessRuleException;
 import com.lipa.application.exception.NotFoundException;
 import com.lipa.application.port.in.ListAccountLedgerUseCase;
-import com.lipa.application.port.out.AccountHistoryQueryPort;
-import com.lipa.application.port.out.AccountLookupPort;
+import com.lipa.application.port.out.AccountReadPort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -16,13 +15,10 @@ public class ListAccountLedgerService implements ListAccountLedgerUseCase {
     private static final int DEFAULT_LIMIT = 50;
     private static final int MAX_LIMIT = 200;
 
-    private final AccountLookupPort accountLookup;
-    private final AccountHistoryQueryPort historyQuery;
+    private final AccountReadPort accounts;
 
-    public ListAccountLedgerService(AccountLookupPort accountLookup,
-                                    AccountHistoryQueryPort historyQuery) {
-        this.accountLookup = accountLookup;
-        this.historyQuery = historyQuery;
+    public ListAccountLedgerService(AccountReadPort accounts) {
+        this.accounts = accounts;
     }
 
     @Override
@@ -35,11 +31,11 @@ public class ListAccountLedgerService implements ListAccountLedgerUseCase {
         int safeLimit = normalizeLimit(limit);
         int safeOffset = normalizeOffset(offset);
 
-        if (!accountLookup.existsById(accountId)) {
+        if (!accounts.existsById(accountId)) {
             throw new NotFoundException("Account not found id=" + accountId);
         }
 
-        var rows = historyQuery.findAccountLedger(accountId, safeLimit, safeOffset);
+        var rows = accounts.findAccountLedger(accountId, safeLimit, safeOffset);
 
         var items = rows.stream()
                 .map(r -> new Item(

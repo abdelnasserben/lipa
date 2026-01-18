@@ -1,37 +1,34 @@
 package com.lipa.application.usecase;
 
-import com.lipa.application.dto.CardPinSnapshot;
-import com.lipa.application.dto.VerifyPinCardUpdate;
 import com.lipa.application.exception.BusinessRuleException;
 import com.lipa.application.exception.NotFoundException;
 import com.lipa.application.port.in.VerifyPinUseCase;
+import com.lipa.application.port.out.CardRepositoryPort;
 import com.lipa.application.port.out.PinHasherPort;
 import com.lipa.application.port.out.TimeProviderPort;
 import com.lipa.application.port.out.VerifyPinAuditPort;
-import com.lipa.application.port.out.VerifyPinCardPort;
+import com.lipa.domain.model.PinPolicy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 
 @Service
 public class VerifyPinService implements VerifyPinUseCase {
 
-    private static final int MAX_FAILS = 5;
-    private static final Duration BLOCK_DURATION = Duration.ofMinutes(15);
-
-    private final VerifyPinCardPort cardPort;
+    private final CardRepositoryPort cards;
     private final PinHasherPort hasher;
     private final VerifyPinAuditPort auditPort;
     private final TimeProviderPort time;
 
-    public VerifyPinService(VerifyPinCardPort cardPort,
+    private final PinPolicy policy = PinPolicy.standard();
+
+    public VerifyPinService(CardRepositoryPort cards,
                             PinHasherPort hasher,
                             VerifyPinAuditPort auditPort,
                             TimeProviderPort time) {
-        this.cardPort = cardPort;
+        this.cards = cards;
         this.hasher = hasher;
         this.auditPort = auditPort;
         this.time = time;
@@ -47,20 +44,32 @@ public class VerifyPinService implements VerifyPinUseCase {
             throw new BusinessRuleException("PIN is required");
         }
 
-        CardPinSnapshot card = cardPort.findByUid(uid)
+        var card = cards.findByUid(uid)
                 .orElseThrow(() -> new NotFoundException("Card not found for uid=" + uid));
 
-        if (!"ACTIVE".equalsIgnoreCase(card.status())) {
+        Instant now = time.now();
+
+        // Domaine décide l'issue (y compris statut non actif / blocage)
+        boolean pinMatches = card.pinHash() != null && !card.pinHash().isBlank()
+                && hasher.matches(pin, card.pinHash());
+
+        var decision = card.verifyPinAttempt(pinMatches, policy, now);
+
+        if (!decision.updatedCard().equals(card)) {
+            // persist only if state changed (failcount reset/increment, block/unblock, updatedAt)
+            cards.save(decision.updatedCard());
+        }
+
+        // Audit + mapping vers le résultat UseCase (contrat inchangé)
+        if (!"ACTIVE".equalsIgnoreCase(card.status().name())) {
             auditPort.record(
                     "PIN_VERIFY_DENIED",
                     card.id(),
                     Map.of("uid", uid, "reason", "CARD_NOT_ACTIVE"),
-                    time.now()
+                    now
             );
             return new Result(false, true);
         }
-
-        Instant now = time.now();
 
         if (card.pinBlockedUntil() != null && now.isBefore(card.pinBlockedUntil())) {
             auditPort.record(
@@ -86,15 +95,7 @@ public class VerifyPinService implements VerifyPinUseCase {
             return new Result(false, false);
         }
 
-        boolean ok = hasher.matches(pin, card.pinHash());
-        if (ok) {
-            cardPort.applyUpdate(new VerifyPinCardUpdate(
-                    card.id(),
-                    0,
-                    null,
-                    now
-            ));
-
+        if (decision.success()) {
             auditPort.record(
                     "PIN_VERIFY_SUCCESS",
                     card.id(),
@@ -104,35 +105,19 @@ public class VerifyPinService implements VerifyPinUseCase {
             return new Result(true, false);
         }
 
-        int newFails = card.pinFailCount() + 1;
-        boolean blocked = false;
-        Instant blockedUntil = null;
-
-        if (newFails >= MAX_FAILS) {
-            blocked = true;
-            blockedUntil = now.plus(BLOCK_DURATION);
-        }
-
-        cardPort.applyUpdate(new VerifyPinCardUpdate(
-                card.id(),
-                newFails,
-                blockedUntil,
-                now
-        ));
-
         auditPort.record(
                 "PIN_VERIFY_FAILED",
                 card.id(),
                 Map.of(
                         "uid", uid,
-                        "failCount", String.valueOf(newFails),
-                        "blocked", String.valueOf(blocked),
-                        "blockedUntil", blockedUntil == null ? "" : blockedUntil.toString()
+                        "failCount", String.valueOf(decision.updatedCard().pinFailCount()),
+                        "blocked", String.valueOf(decision.cardBlocked()),
+                        "blockedUntil", decision.blockedUntil() == null ? "" : decision.blockedUntil().toString()
                 ),
                 now
         );
 
-        return new Result(false, blocked);
+        return new Result(false, decision.cardBlocked());
     }
 
     private String normalizeUid(String uid) {

@@ -5,8 +5,7 @@ import com.lipa.application.dto.PageResult;
 import com.lipa.application.exception.BusinessRuleException;
 import com.lipa.application.exception.NotFoundException;
 import com.lipa.application.port.in.ListAccountTransactionsUseCase;
-import com.lipa.application.port.out.AccountHistoryQueryPort;
-import com.lipa.application.port.out.AccountLookupPort;
+import com.lipa.application.port.out.AccountReadPort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,13 +14,10 @@ import java.util.UUID;
 @Service
 public class ListAccountTransactionsService implements ListAccountTransactionsUseCase {
 
-    private final AccountLookupPort accountLookup;
-    private final AccountHistoryQueryPort historyQuery;
+    private final AccountReadPort accounts;
 
-    public ListAccountTransactionsService(AccountLookupPort accountLookup,
-                                          AccountHistoryQueryPort historyQuery) {
-        this.accountLookup = accountLookup;
-        this.historyQuery = historyQuery;
+    public ListAccountTransactionsService(AccountReadPort accounts) {
+        this.accounts = accounts;
     }
 
     @Override
@@ -31,17 +27,13 @@ public class ListAccountTransactionsService implements ListAccountTransactionsUs
             throw new BusinessRuleException("accountId is required");
         }
 
-        if (!accountLookup.existsById(accountId)) {
+        if (!accounts.existsById(accountId)) {
             throw new NotFoundException("Account not found id=" + accountId);
         }
 
         PageRequest page = PageRequest.of(limit, offset);
 
-        var rows = historyQuery.findAccountTransactions(
-                accountId,
-                page.limit(),
-                page.offset()
-        );
+        var rows = accounts.findAccountTransactions(accountId, page.limit(), page.offset());
 
         var items = rows.stream()
                 .map(r -> new Item(

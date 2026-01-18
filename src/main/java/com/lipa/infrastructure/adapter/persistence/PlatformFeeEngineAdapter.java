@@ -2,9 +2,9 @@ package com.lipa.infrastructure.adapter.persistence;
 
 import com.lipa.application.exception.BusinessRuleException;
 import com.lipa.application.util.FeeCalculator;
-import com.lipa.infrastructure.persistence.jpa.entity.AccountEntity;
-import com.lipa.infrastructure.persistence.jpa.repo.AccountJpaRepository;
-import com.lipa.infrastructure.persistence.jpa.repo.FeeConfigurationJpaRepository;
+import com.lipa.infrastructure.persistence.entity.AccountEntity;
+import com.lipa.infrastructure.persistence.repo.AccountJpaRepository;
+import com.lipa.infrastructure.persistence.repo.FeeConfigurationJpaRepository;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;

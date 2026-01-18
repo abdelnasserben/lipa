@@ -2,21 +2,21 @@ package com.lipa.application.usecase;
 
 import com.lipa.application.exception.NotFoundException;
 import com.lipa.application.port.in.GetCurrentFeeConfigurationUseCase;
-import com.lipa.application.port.out.FeeConfigurationPort;
+import com.lipa.application.port.out.FeeConfigurationRepositoryPort;
 import org.springframework.stereotype.Service;
 
 @Service
 public class GetCurrentFeeConfigurationService implements GetCurrentFeeConfigurationUseCase {
 
-    private final FeeConfigurationPort port;
+    private final FeeConfigurationRepositoryPort repo;
 
-    public GetCurrentFeeConfigurationService(FeeConfigurationPort port) {
-        this.port = port;
+    public GetCurrentFeeConfigurationService(FeeConfigurationRepositoryPort repo) {
+        this.repo = repo;
     }
 
     @Override
     public Result get() {
-        var cfg = port.findActive()
+        var cfg = repo.findActive()
                 .orElseThrow(() -> new NotFoundException("Fee configuration not found"));
 
         return new Result(
