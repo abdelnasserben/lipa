@@ -20,12 +20,12 @@ public class PaymentPersistenceAdapter implements PaymentPersistencePort {
     private final AccountJpaRepository accountRepo;
     private final TransactionJpaRepository transactionRepo;
     private final LedgerEntryJpaRepository ledgerRepo;
-    private final PlatformFeeEngine feeEngine;
+    private final PlatformFeeEngineAdapter feeEngine;
 
     public PaymentPersistenceAdapter(AccountJpaRepository accountRepo,
                                      TransactionJpaRepository transactionRepo,
                                      LedgerEntryJpaRepository ledgerRepo,
-                                     PlatformFeeEngine feeEngine) {
+                                     PlatformFeeEngineAdapter feeEngine) {
         this.accountRepo = accountRepo;
         this.transactionRepo = transactionRepo;
         this.ledgerRepo = ledgerRepo;

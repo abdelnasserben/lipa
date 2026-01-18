@@ -8,9 +8,9 @@ import java.math.BigDecimal;
 @Component
 public class PaymentFeeAdapter implements PaymentFeePort {
 
-    private final PlatformFeeEngine feeEngine;
+    private final PlatformFeeEngineAdapter feeEngine;
 
-    public PaymentFeeAdapter(PlatformFeeEngine feeEngine) {
+    public PaymentFeeAdapter(PlatformFeeEngineAdapter feeEngine) {
         this.feeEngine = feeEngine;
     }
 

@@ -10,15 +10,15 @@ import org.springframework.stereotype.Component;
 import java.math.BigDecimal;
 
 @Component
-public class PlatformFeeEngine {
+public class PlatformFeeEngineAdapter {
 
     private static final String PLATFORM_FEES_DISPLAY_NAME = "Platform Fees";
 
     private final AccountJpaRepository accountRepo;
     private final FeeConfigurationJpaRepository feeRepo;
 
-    public PlatformFeeEngine(AccountJpaRepository accountRepo,
-                             FeeConfigurationJpaRepository feeRepo) {
+    public PlatformFeeEngineAdapter(AccountJpaRepository accountRepo,
+                                    FeeConfigurationJpaRepository feeRepo) {
         this.accountRepo = accountRepo;
         this.feeRepo = feeRepo;
     }

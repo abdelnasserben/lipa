@@ -27,6 +27,7 @@ public class CreatePaymentService implements CreatePaymentUseCase {
     private final PaymentAccountPort accountPort;
     private final PaymentLedgerPort ledgerPort;
     private final PaymentPersistencePort persistencePort;
+    private final PaymentFeePort paymentFeePort;
     private final PaymentAuditPort auditPort;
     private final TimeProviderPort time;
 
@@ -35,7 +36,7 @@ public class CreatePaymentService implements CreatePaymentUseCase {
                                 PaymentCardPort cardPort,
                                 PaymentAccountPort accountPort,
                                 PaymentLedgerPort ledgerPort,
-                                PaymentPersistencePort persistencePort,
+                                PaymentPersistencePort persistencePort, PaymentFeePort paymentFeePort,
                                 PaymentAuditPort auditPort,
                                 TimeProviderPort time) {
         this.idempotencyPort = idempotencyPort;
@@ -44,6 +45,7 @@ public class CreatePaymentService implements CreatePaymentUseCase {
         this.accountPort = accountPort;
         this.ledgerPort = ledgerPort;
         this.persistencePort = persistencePort;
+        this.paymentFeePort = paymentFeePort;
         this.auditPort = auditPort;
         this.time = time;
     }
@@ -89,8 +91,10 @@ public class CreatePaymentService implements CreatePaymentUseCase {
 
         // 5) Balance check (DRY)
         BigDecimal balance = BalanceCalculator.balanceOf(ledgerPort, payerId);
+        BigDecimal fee = paymentFeePort.quote(command.amount()).feeAmount();
+        BigDecimal amountWithFee = command.amount().add(fee);
 
-        if (balance.compareTo(command.amount()) < 0) {
+        if (balance.compareTo(amountWithFee) < 0) {
             auditPort.record(new PaymentAuditCommand(
                     "CLIENT",
                     payerId,
